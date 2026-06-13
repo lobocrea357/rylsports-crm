@@ -14,14 +14,14 @@ export async function POST(req: NextRequest) {
     const msg = body.payload;
     if (!msg?.from) return NextResponse.json({ ok: true });
 
-    // Skip groups and LID (linked device identifiers — not real phone numbers)
+    // Skip groups and LID (linked device identifiers)
     if (msg.from.includes("@g.us")) return NextResponse.json({ ok: true });
     if (msg.from.includes("@lid")) return NextResponse.json({ ok: true });
 
     const phone = msg.from.replace("@c.us", "").replace(/@\w+$/, "");
     const pb = await getAdminPb();
 
-    // Upsert contact — find or create
+    // Upsert contact
     let contact = await pb.collection("contacts")
       .getFirstListItem(`phone = "${phone}"`)
       .catch(() => null);
@@ -36,10 +36,9 @@ export async function POST(req: NextRequest) {
         category: "prospect",
         sale_status: "none",
         last_message_at: now,
-      }).catch(async () => {
-        // Race condition: fetch the one just created by another request
-        return pb.collection("contacts").getFirstListItem(`phone = "${phone}"`).catch(() => null);
-      });
+      }).catch(async () =>
+        pb.collection("contacts").getFirstListItem(`phone = "${phone}"`).catch(() => null)
+      );
     } else {
       await pb.collection("contacts").update(contact.id, {
         last_message_at: now,
@@ -55,11 +54,21 @@ export async function POST(req: NextRequest) {
     const isMedia = msg.hasMedia || MEDIA_TYPES.has(msgType);
     const content = msg.body ?? msg.caption ?? "";
 
-    // Media URL points to WAHA download endpoint (proxied through /api/media)
-    const media_url = isMedia
-      ? `${WAHA_URL}/api/${WAHA_SESSION}/messages/${encodeURIComponent(wahaId)}/download`
-      : "";
-    const media_mime = isMedia ? (msg.mimetype ?? guessMediaMime(msgType)) : "";
+    // Use media.url from WAHA payload — WAHA downloads and stores media locally
+    let media_url = "";
+    let media_mime = "";
+    if (isMedia) {
+      // WAHA puts downloaded media URL in msg.media.url
+      const rawUrl: string = msg.media?.url ?? msg.mediaUrl ?? "";
+      if (rawUrl) {
+        // Normalize any internal address to our configured WAHA_URL
+        media_url = rawUrl.replace(/https?:\/\/[^/]+/, WAHA_URL);
+      } else {
+        // Fallback: standard download endpoint
+        media_url = `${WAHA_URL}/api/${WAHA_SESSION}/messages/${encodeURIComponent(wahaId)}/download`;
+      }
+      media_mime = msg.media?.mimetype ?? msg.mimetype ?? guessMediaMime(msgType);
+    }
 
     // Idempotent insert
     const existing = await pb.collection("messages")
