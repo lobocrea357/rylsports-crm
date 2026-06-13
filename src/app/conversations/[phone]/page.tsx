@@ -35,11 +35,13 @@ export default function ConversationPage() {
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-9 h-9 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-400 font-bold shrink-0">
-              {(contact?.name || phone)?.[0]?.toUpperCase()}
+              {(contact?.name && contact.name !== phone ? contact.name : `+${phone}`)?.[0]?.toUpperCase()}
             </div>
             <div className="min-w-0">
-              <p className="font-semibold text-white truncate">{contact?.name || phone}</p>
-              <p className="text-xs text-slate-500 truncate">{phone}</p>
+              <p className="font-semibold text-white truncate">
+                {contact?.name && contact.name !== phone ? contact.name : `+${phone}`}
+              </p>
+              <p className="text-xs text-slate-500 truncate">+{phone}</p>
             </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">

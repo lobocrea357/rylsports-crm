@@ -14,10 +14,11 @@ export async function POST(req: NextRequest) {
     const msg = body.payload;
     if (!msg?.from) return NextResponse.json({ ok: true });
 
-    // Skip group messages
+    // Skip groups and LID (linked device identifiers — not real phone numbers)
     if (msg.from.includes("@g.us")) return NextResponse.json({ ok: true });
+    if (msg.from.includes("@lid")) return NextResponse.json({ ok: true });
 
-    const phone = msg.from.replace("@c.us", "");
+    const phone = msg.from.replace("@c.us", "").replace(/@\w+$/, "");
     const pb = await getAdminPb();
 
     // Upsert contact — find or create

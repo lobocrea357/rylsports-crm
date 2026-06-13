@@ -157,8 +157,10 @@ export default function ContactList({ activePhone }: { activePhone?: string }) {
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-white truncate">{c.name || c.phone}</p>
-                <p className="text-xs text-slate-500 truncate">{c.phone}</p>
+                <p className="text-sm font-medium text-white truncate">
+                  {c.name && c.name !== c.phone ? c.name : `+${c.phone}`}
+                </p>
+                <p className="text-xs text-slate-500 truncate">+{c.phone}</p>
               </div>
               <div className="shrink-0">
                 <CategoryBadge category={c.category} />
