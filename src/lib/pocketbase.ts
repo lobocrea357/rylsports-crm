@@ -32,6 +32,7 @@ export interface Contact {
   ai_summary: string;
   notes: string;
   last_message_at: string;
+  last_message_preview: string;
 }
 
 export interface Message {
