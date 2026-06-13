@@ -33,6 +33,7 @@ export interface Contact {
   notes: string;
   last_message_at: string;
   last_message_preview: string;
+  read: boolean;
 }
 
 export interface Message {

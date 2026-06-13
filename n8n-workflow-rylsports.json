@@ -1,0 +1,193 @@
+{
+  "name": "RyL Sports - Auto Responder WhatsApp",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rylsports-waha",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "WAHA Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "rylsports-waha"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK"
+      },
+      "id": "a1b2c3d4-0002-0002-0002-000000000002",
+      "name": "Responder 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [460, 180]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond1",
+              "leftValue": "={{ $json.body.payload.fromMe }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "cond2",
+              "leftValue": "={{ $json.body.payload.from }}",
+              "rightValue": "@g.us",
+              "operator": {
+                "type": "string",
+                "operation": "notContains"
+              }
+            },
+            {
+              "id": "cond3",
+              "leftValue": "={{ $json.body.event }}",
+              "rightValue": "message",
+              "operator": {
+                "type": "string",
+                "operation": "startsWith"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a1b2c3d4-0003-0003-0003-000000000003",
+      "name": "¿Mensaje entrante?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sportwaha.lobocrea.pro/api/sendText",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Api-Key",
+              "value": "6d6a177302c727bb2ad9b1a06829155b"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session",
+              "value": "default"
+            },
+            {
+              "name": "chatId",
+              "value": "={{ $('WAHA Webhook').item.json.body.payload._data?.key?.remoteJidAlt || $('WAHA Webhook').item.json.body.payload.from }}"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.choices[0].message.content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0005-0005-0005-000000000005",
+      "name": "Enviar respuesta WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer AIzaSyABEStmaldj2C8bOJ2p4eCnvQAX7ukjZF4"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gemini-2.5-flash\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Eres el asistente de ventas de RyL Sports Vzla, un almacén mayorista de ropa deportiva. Responde de forma amable, concisa y profesional en español. Usa la siguiente información del negocio para responder las preguntas del cliente:\\n\\n---\\n\\nPAGO MOVIL - JURIDICO 🏦\\n📱 0424-4454707\\n🏢 J-50674650-6\\n🏦 Banco Provincial\\nEnviar el capture al realizar el pago.\\n\\nENTREGAS PERSONALES - ARAGUA 🚙\\n📍 Maracay (Peaje Tapatapa, Terminal, Redoma del Avión)\\n📍 Turmero Encrucijada (Antiguo Wendy)\\n📍 Peaje La Victoria\\nCompra mínima 50$\\n\\nRecibimos pedidos los días VIERNES\\n\\nENVÍOS NACIONALES 🇻🇪\\nAgencias: ZOOM, MRW (Toda Venezuela) y LAE (Interior del país).\\nHorario: Lunes a viernes.\\nRapidez: Si pagas antes de la 1:00 PM, ¡sale el mismo día! Luego de esa hora, sale al día siguiente.\\nCostos: Según el peso del paquete (únicamente indicado por la agencia al momento de recibirlo).\\n\\nCatálogo: https://www.inversionesdafer.com/shop\\nCanal VIP: https://whatsapp.com/channel/0029Vb9U4wJ1XquSeV9ig50v\\n\\nCompra mínima 6 piezas iguales o variadas. NO VENDEMOS AL DETAL.\\nUbicación: https://maps.google.com/?q=10.166527,-67.990303\\n---\\n\\nSi el cliente pregunta algo que no está en la información anterior, dile que un asesor le responderá pronto. No inventes información. Mantén un tono cercano y venezolano. Usa emojis moderadamente.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"={{ $('WAHA Webhook').item.json.body.payload.body || '[Archivo multimedia recibido]' }}\"\n    }\n  ],\n  \"temperature\": 0.7,\n  \"max_tokens\": 500\n}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0004-0004-0004-000000000004",
+      "name": "Gemini - Generar respuesta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "WAHA Webhook": {
+      "main": [
+        [
+          {
+            "node": "Responder 200",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "¿Mensaje entrante?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Mensaje entrante?": {
+      "main": [
+        [
+          {
+            "node": "Gemini - Generar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Generar respuesta": {
+      "main": [
+        [
+          {
+            "node": "Enviar respuesta WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2026-06-13T00:00:00.000Z",
+  "versionId": "1"
+}

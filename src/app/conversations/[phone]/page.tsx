@@ -18,7 +18,17 @@ export default function ConversationPage() {
       .then((r) => r.json())
       .then((contacts: Contact[]) => {
         const found = contacts.find((c) => c.phone === phone);
-        if (found) setContact(found);
+        if (found) {
+          setContact(found);
+          // Mark as read when opening
+          if (found.read === false) {
+            fetch(`/api/contacts/${found.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ read: true }),
+            }).catch(() => {});
+          }
+        }
       });
   }, [phone]);
 

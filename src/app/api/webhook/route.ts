@@ -25,6 +25,24 @@ function previewText(msg: Record<string, unknown>, msgType: string): string {
   return icons[msgType] ?? `[${msgType}]`;
 }
 
+function resolvePhone(msg: Record<string, unknown>): string | null {
+  const from = msg.from as string ?? "";
+
+  // Skip groups
+  if (from.includes("@g.us")) return null;
+
+  // @lid messages: real phone is in _data.key.remoteJidAlt
+  if (from.includes("@lid")) {
+    const data = msg._data as Record<string, unknown> | undefined;
+    const key = data?.key as Record<string, string> | undefined;
+    const alt = key?.remoteJidAlt ?? "";
+    if (alt) return alt.replace("@s.whatsapp.net", "").replace(/@\w+$/, "");
+    return null; // No real phone found, skip
+  }
+
+  return from.replace("@c.us", "").replace(/@\w+$/, "");
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -34,19 +52,18 @@ export async function POST(req: NextRequest) {
     const msg = body.payload as Record<string, unknown>;
     if (!msg?.from) return NextResponse.json({ ok: true });
 
-    const from = msg.from as string;
-    if (from.includes("@g.us") || from.includes("@lid")) return NextResponse.json({ ok: true });
+    const phone = resolvePhone(msg);
+    if (!phone) return NextResponse.json({ ok: true });
 
-    const phone = from.replace("@c.us", "").replace(/@\w+$/, "");
     const pb = await getAdminPb();
     const now = new Date((msg.timestamp as number) ? (msg.timestamp as number) * 1000 : Date.now()).toISOString();
     const msgType = (msg.type as string) ?? "text";
     const content = (msg.body as string) ?? (msg.caption as string) ?? "";
     const preview = previewText(msg, msgType);
+    const notifyName = (msg.notifyName as string) || "";
 
     // Upsert contact
     let contact = await pb.collection("contacts").getFirstListItem(`phone = "${phone}"`).catch(() => null);
-    const notifyName = (msg.notifyName as string) || "";
 
     if (!contact) {
       contact = await pb.collection("contacts").create({
@@ -55,14 +72,17 @@ export async function POST(req: NextRequest) {
         session: (body.session as string) ?? WAHA_SESSION,
         category: "prospect",
         sale_status: "none",
+        read: !(msg.fromMe as boolean),
         last_message_at: now,
         last_message_preview: preview,
-      }).catch(async () => pb.collection("contacts").getFirstListItem(`phone = "${phone}"`).catch(() => null));
+      }).catch(async () =>
+        pb.collection("contacts").getFirstListItem(`phone = "${phone}"`).catch(() => null)
+      );
     } else {
-      const updates: Record<string, string> = { last_message_at: now, last_message_preview: preview };
-      if (notifyName && notifyName !== contact.name && contact.name === contact.phone) {
-        updates.name = notifyName; // Only auto-update name if it's still the phone number
-      }
+      const updates: Record<string, unknown> = { last_message_at: now, last_message_preview: preview };
+      if (notifyName) updates.name = notifyName;
+      // Mark as unread only for incoming messages
+      if (!(msg.fromMe as boolean)) updates.read = false;
       await pb.collection("contacts").update(contact.id, updates).catch(() => {});
     }
 
@@ -72,23 +92,25 @@ export async function POST(req: NextRequest) {
     const isMedia = (msg.hasMedia as boolean) || MEDIA_TYPES.has(msgType);
     let media_url = "";
     let media_mime = "";
+
     if (isMedia) {
       const mediaObj = msg.media as Record<string, string> | undefined;
       const rawUrl = mediaObj?.url ?? (msg.mediaUrl as string) ?? "";
       if (rawUrl) {
-        // Normalize internal WAHA URL to our configured WAHA_URL
-        media_url = rawUrl.replace(/https?:\/\/[^/]+/, WAHA_URL);
-      } else {
-        // Fallback: construct download URL from message ID
-        const wahaIdFallback = (msg.id as Record<string, string>)?._serialized ?? String(msg.id ?? `${phone}_${msg.timestamp}`);
-        media_url = `${WAHA_URL}/api/${WAHA_SESSION}/messages/${encodeURIComponent(wahaIdFallback)}/download`;
+        // Replace WAHA's internal port with our mapped port
+        media_url = rawUrl.replace(/https?:\/\/localhost:\d+/, WAHA_URL);
       }
       media_mime = mediaObj?.mimetype ?? (msg.mimetype as string) ?? guessMediaMime(msgType);
     }
 
-    // Save message (idempotent)
-    const wahaId = (msg.id as Record<string, string>)?._serialized ?? String(msg.id ?? `${phone}_${msg.timestamp}`);
-    const existing = await pb.collection("messages").getFirstListItem(`waha_message_id = "${wahaId}"`).catch(() => null);
+    // Save message (idempotent by waha_message_id)
+    const msgId = msg.id as Record<string, string> | string;
+    const wahaId = (typeof msgId === "object" ? msgId._serialized : msgId) ?? `${phone}_${msg.timestamp}`;
+
+    const existing = await pb.collection("messages")
+      .getFirstListItem(`waha_message_id = "${wahaId}"`)
+      .catch(() => null);
+
     if (!existing) {
       await pb.collection("messages").create({
         contact: contact.id,
