@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import clsx from "clsx";
 import CategoryBadge from "./CategoryBadge";
 import SaleStatusBadge from "./SaleStatusBadge";
@@ -21,6 +22,10 @@ export default function ContactList({ activePhone }: { activePhone?: string }) {
   const [filter, setFilter] = useState<Category | "all">("all");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [showNew, setShowNew] = useState(false);
+  const [newPhone, setNewPhone] = useState("");
+  const [newName, setNewName] = useState("");
+  const router = useRouter();
 
   const load = useCallback(async () => {
     const res = await fetch("/api/contacts", { cache: "no-store" });
@@ -28,11 +33,34 @@ export default function ContactList({ activePhone }: { activePhone?: string }) {
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, [load]);
+
+  async function createContact() {
+    if (!newPhone.trim()) return;
+    const phone = newPhone.replace(/\D/g, "");
+    const res = await fetch("/api/contacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phone,
+        name: newName || phone,
+        session: "default",
+        category: "prospect",
+        sale_status: "none",
+        last_message_at: new Date().toISOString(),
+      }),
+    });
+    if (res.ok) {
+      setShowNew(false);
+      setNewPhone(""); setNewName("");
+      await load();
+      router.push(`/conversations/${phone}`);
+    }
+  }
 
   const filtered = contacts.filter((c) => {
     if (filter !== "all" && c.category !== filter) return false;
-    if (search && !c.name.toLowerCase().includes(search.toLowerCase()) && !c.phone.includes(search)) return false;
+    if (search && !c.name?.toLowerCase().includes(search.toLowerCase()) && !c.phone?.includes(search)) return false;
     return true;
   });
 
@@ -43,9 +71,18 @@ export default function ContactList({ activePhone }: { activePhone?: string }) {
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="p-4 border-b border-slate-800">
-        <div className="flex items-center gap-2 mb-3">
-          <span className="text-amber-400 text-xl font-bold">⚡</span>
-          <span className="font-bold text-white text-sm">RyL Sports Vzla</span>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-amber-400 text-xl font-bold">⚡</span>
+            <span className="font-bold text-white text-sm">RyL Sports Vzla</span>
+          </div>
+          <button
+            onClick={() => setShowNew(true)}
+            className="text-xs bg-amber-500 hover:bg-amber-400 text-black font-bold px-2 py-1 rounded-lg transition-colors"
+            title="Nuevo contacto"
+          >
+            + Nuevo
+          </button>
         </div>
         <input
           className="w-full bg-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder:text-slate-500 outline-none focus:ring-1 focus:ring-amber-500"
@@ -54,6 +91,33 @@ export default function ContactList({ activePhone }: { activePhone?: string }) {
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
+
+      {/* New contact modal */}
+      {showNew && (
+        <div className="mx-3 my-2 bg-slate-800 rounded-xl p-3 border border-slate-700">
+          <p className="text-xs font-semibold text-slate-300 mb-2">Nuevo contacto</p>
+          <input
+            className="w-full bg-slate-700 rounded-lg px-3 py-2 text-sm text-white mb-2 outline-none focus:ring-1 focus:ring-amber-500"
+            placeholder="Teléfono (ej: 584121234567)"
+            value={newPhone}
+            onChange={(e) => setNewPhone(e.target.value)}
+          />
+          <input
+            className="w-full bg-slate-700 rounded-lg px-3 py-2 text-sm text-white mb-2 outline-none focus:ring-1 focus:ring-amber-500"
+            placeholder="Nombre (opcional)"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <button onClick={createContact} className="flex-1 bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold py-1.5 rounded-lg">
+              Crear
+            </button>
+            <button onClick={() => setShowNew(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs py-1.5 rounded-lg">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Category filters */}
       <div className="px-2 py-2 border-b border-slate-800 flex flex-wrap gap-1">
@@ -75,9 +139,12 @@ export default function ContactList({ activePhone }: { activePhone?: string }) {
 
       {/* List */}
       <div className="flex-1 overflow-y-auto">
-        {loading && <div className="p-4 text-slate-500 text-sm">Cargando...</div>}
+        {loading && <div className="p-4 text-slate-500 text-sm text-center">Cargando...</div>}
         {!loading && filtered.length === 0 && (
-          <div className="p-4 text-slate-500 text-sm">No hay contactos</div>
+          <div className="p-6 text-slate-600 text-sm text-center">
+            <p className="text-2xl mb-2">📱</p>
+            <p>Los contactos aparecerán aquí cuando lleguen mensajes por WhatsApp, o puedes crear uno manualmente.</p>
+          </div>
         )}
         {filtered.map((c) => (
           <Link
@@ -93,7 +160,7 @@ export default function ContactList({ activePhone }: { activePhone?: string }) {
                 <p className="text-sm font-medium text-white truncate">{c.name || c.phone}</p>
                 <p className="text-xs text-slate-500 truncate">{c.phone}</p>
               </div>
-              <div className="flex flex-col items-end gap-1 shrink-0">
+              <div className="shrink-0">
                 <CategoryBadge category={c.category} />
               </div>
             </div>
