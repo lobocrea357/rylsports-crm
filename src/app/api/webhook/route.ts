@@ -1,59 +1,81 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminPb } from "@/lib/pocketbase";
 
+const MEDIA_TYPES = new Set(["image", "video", "audio", "document", "sticker", "ptt", "voice"]);
+const WAHA_URL = process.env.WAHA_URL ?? "http://localhost:3088";
+const WAHA_SESSION = process.env.WAHA_SESSION ?? "default";
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const event = body.event;
-    if (event !== "message" && event !== "message.any") return NextResponse.json({ ok: true });
+    const event = body.event as string;
+    if (!event?.startsWith("message")) return NextResponse.json({ ok: true });
 
     const msg = body.payload;
-    if (!msg || !msg.from) return NextResponse.json({ ok: true });
+    if (!msg?.from) return NextResponse.json({ ok: true });
 
-    const phone = msg.from.replace("@c.us", "").replace("@g.us", "");
-    const isGroup = msg.from.includes("@g.us");
-    if (isGroup) return NextResponse.json({ ok: true });
+    // Skip group messages
+    if (msg.from.includes("@g.us")) return NextResponse.json({ ok: true });
 
+    const phone = msg.from.replace("@c.us", "");
     const pb = await getAdminPb();
 
-    // Upsert contact
-    let contact;
-    try {
-      const records = await pb.collection("contacts").getList(1, 1, {
-        filter: `phone = "${phone}"`,
+    // Upsert contact — find or create
+    let contact = await pb.collection("contacts")
+      .getFirstListItem(`phone = "${phone}"`)
+      .catch(() => null);
+
+    const now = new Date(msg.timestamp ? msg.timestamp * 1000 : Date.now()).toISOString();
+
+    if (!contact) {
+      contact = await pb.collection("contacts").create({
+        phone,
+        name: msg.notifyName || phone,
+        session: body.session ?? WAHA_SESSION,
+        category: "prospect",
+        sale_status: "none",
+        last_message_at: now,
+      }).catch(async () => {
+        // Race condition: fetch the one just created by another request
+        return pb.collection("contacts").getFirstListItem(`phone = "${phone}"`).catch(() => null);
       });
-      if (records.items.length > 0) {
-        contact = records.items[0];
-        await pb.collection("contacts").update(contact.id, {
-          last_message_at: new Date(msg.timestamp * 1000).toISOString(),
-        });
-      } else {
-        contact = await pb.collection("contacts").create({
-          phone,
-          name: msg.notifyName || phone,
-          session: body.session ?? "default",
-          category: "prospect",
-          sale_status: "none",
-          last_message_at: new Date(msg.timestamp * 1000).toISOString(),
-        });
-      }
-    } catch {
-      return NextResponse.json({ ok: true });
+    } else {
+      await pb.collection("contacts").update(contact.id, {
+        last_message_at: now,
+        ...(msg.notifyName && msg.notifyName !== contact.name ? { name: msg.notifyName } : {}),
+      }).catch(() => {});
     }
 
-    // Save message
+    if (!contact) return NextResponse.json({ ok: true });
+
+    // Build message data
     const wahaId = msg.id?._serialized ?? msg.id ?? `${phone}_${msg.timestamp}`;
-    try {
-      await pb.collection("messages").getFirstListItem(`waha_message_id = "${wahaId}"`);
-    } catch {
+    const msgType = msg.type ?? "text";
+    const isMedia = msg.hasMedia || MEDIA_TYPES.has(msgType);
+    const content = msg.body ?? msg.caption ?? "";
+
+    // Media URL points to WAHA download endpoint (proxied through /api/media)
+    const media_url = isMedia
+      ? `${WAHA_URL}/api/${WAHA_SESSION}/messages/${encodeURIComponent(wahaId)}/download`
+      : "";
+    const media_mime = isMedia ? (msg.mimetype ?? guessMediaMime(msgType)) : "";
+
+    // Idempotent insert
+    const existing = await pb.collection("messages")
+      .getFirstListItem(`waha_message_id = "${wahaId}"`)
+      .catch(() => null);
+
+    if (!existing) {
       await pb.collection("messages").create({
         contact: contact.id,
         waha_message_id: wahaId,
-        content: msg.body ?? msg.caption ?? "",
+        content,
         from_me: msg.fromMe ?? false,
-        timestamp: new Date(msg.timestamp * 1000).toISOString(),
-        message_type: msg.type ?? "text",
-      });
+        timestamp: now,
+        message_type: msgType,
+        media_url,
+        media_mime,
+      }).catch(() => {});
     }
 
     return NextResponse.json({ ok: true });
@@ -61,4 +83,17 @@ export async function POST(req: NextRequest) {
     console.error("Webhook error:", e);
     return NextResponse.json({ ok: true });
   }
+}
+
+function guessMediaMime(type: string): string {
+  const map: Record<string, string> = {
+    image: "image/jpeg",
+    video: "video/mp4",
+    audio: "audio/ogg",
+    ptt: "audio/ogg",
+    voice: "audio/ogg",
+    document: "application/octet-stream",
+    sticker: "image/webp",
+  };
+  return map[type] ?? "application/octet-stream";
 }
